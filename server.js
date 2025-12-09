@@ -11,7 +11,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 const DB_FILE = 'skorlar.json';
-const ADMIN_PASSWORD = "qurayisbest"; // <-- BURAYA KENDİ ŞİFRENİ YAZ
+const ADMIN_PASSWORD = "qurayisbest"; // 
 
 // Veritabanını Başlat
 let scores = [];

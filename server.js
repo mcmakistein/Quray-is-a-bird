@@ -27,7 +27,7 @@ app.get('/api/scores', (req, res) => {
     res.json(topScores);
 });
 
-// 2. Yeni Skor Kaydetme İsteği (POST)
+// 2. Akıllı Skor Kaydetme (Tek İsim - En Yüksek Puan)
 app.post('/api/score', (req, res) => {
     const { name, score } = req.body;
 
@@ -35,15 +35,30 @@ app.post('/api/score', (req, res) => {
         return res.status(400).json({ status: 'error', message: 'Eksik bilgi' });
     }
 
-    // Yeni skoru ekle
-    scores.push({ name, score: parseInt(score), date: new Date() });
+    const newScore = parseInt(score);
+
+    // Bu isimde biri var mı diye kontrol et
+    const existingUserIndex = scores.findIndex(s => s.name === name);
+
+    if (existingUserIndex !== -1) {
+        // Kullanıcı zaten var!
+        // Eğer yeni skor eskisinden büyükse güncelle, yoksa elleme.
+        if (newScore > scores[existingUserIndex].score) {
+            scores[existingUserIndex].score = newScore;
+            scores[existingUserIndex].date = new Date();
+        }
+    } else {
+        // Kullanıcı yok, yeni kayıt oluştur
+        scores.push({ name, score: newScore, date: new Date() });
+    }
     
-    // Dosyaya kaydet (Sunucu kapanınca silinmesin diye)
+    // Dosyaya kaydet
     fs.writeFileSync(DB_FILE, JSON.stringify(scores));
 
-    res.json({ status: 'success', message: 'Skor kaydedildi' });
+    res.json({ status: 'success', message: 'İşlem tamam' });
 });
 
 app.listen(PORT, () => {
     console.log(`Sunucu http://localhost:${PORT} adresinde çalışıyor...`);
+
 });

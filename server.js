@@ -112,7 +112,38 @@ app.get('/api/admin/add', async (req, res) => {
         res.send("EKLENDİ");
     }
 });
+// --- ADMIN KOMUTLARI (SİLME & SIFIRLAMA) ---
 
+// 1. TEK KİŞİ SİLME: /api/admin/delete?name=Arda&pass=SİFRE123
+app.get('/api/admin/delete', async (req, res) => {
+    const { name, pass } = req.query;
+    
+    // Şifre kontrolü
+    if (pass !== ADMIN_PASSWORD) return res.send("HATA: Yanlış Şifre!");
+    if (!name) return res.send("HATA: İsim belirtmedin!");
+
+    // MongoDB'den sil
+    const sonuc = await Score.deleteOne({ name: name });
+
+    if (sonuc.deletedCount > 0) {
+        res.send(`BAŞARILI: '${name}' isimli oyuncu silindi.`);
+    } else {
+        res.send(`HATA: '${name}' diye biri listede yok.`);
+    }
+});
+
+// 2. TABLOYU KOMPLE SIFIRLAMA: /api/admin/reset?pass=SİFRE123
+app.get('/api/admin/reset', async (req, res) => {
+    const { pass } = req.query;
+
+    // Şifre kontrolü
+    if (pass !== ADMIN_PASSWORD) return res.send("HATA: Yanlış Şifre!");
+
+    // Her şeyi sil
+    await Score.deleteMany({});
+    
+    res.send("BAŞARILI: Tüm skor tablosu sıfırlandı, veritabanı tertemiz!");
+});
 app.listen(PORT, () => {
     console.log(`Sunucu ${PORT} portunda çalışıyor...`);
 });

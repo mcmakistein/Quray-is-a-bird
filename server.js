@@ -1,117 +1,118 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const fs = require('fs');
+const mongoose = require('mongoose'); // Yeni kütüphanemiz
 
 const app = express();
-// Render'ın verdiği portu kullan, yoksa 3000
-const PORT = process.env.PORT || 3000; 
+const PORT = process.env.PORT || 3000;
+
+// --- AYARLAR ---
+// BURAYA MongoDB'den aldığın linki yapıştır!
+// Şifreni <password> yerine yazmayı unutma.
+const MONGO_URI = "mongodb+srv://ArdaQ:<db_password>@cluster0.rzmtpg6.mongodb.net/?appName=Cluster0"; 
+
+const ADMIN_PASSWORD = "Qurayisabest"; // Admin şifren
 
 app.use(cors());
 app.use(bodyParser.json());
 
-const DB_FILE = 'skorlar.json';
-const ADMIN_PASSWORD = "qurayisbest"; // 
+// --- MONGODB BAĞLANTISI ---
+mongoose.connect(MONGO_URI)
+    .then(() => console.log("MongoDB'ye Bağlandı!"))
+    .catch(err => console.log("Veritabanı Hatası:", err));
 
-// Veritabanını Başlat
-let scores = [];
-if (fs.existsSync(DB_FILE)) {
-    try {
-        scores = JSON.parse(fs.readFileSync(DB_FILE));
-    } catch (e) {
-        scores = [];
-    }
-} else {
-    fs.writeFileSync(DB_FILE, JSON.stringify(scores));
-}
+// --- VERİTABANI ŞEMASI (TABLO YAPISI) ---
+const scoreSchema = new mongoose.Schema({
+    name: String,
+    score: Number,
+    date: { type: Date, default: Date.now }
+});
+
+const Score = mongoose.model('Score', scoreSchema);
+
+// --- API ---
 
 // 1. Skorları Getir
-app.get('/api/scores', (req, res) => {
-    // Puanı yüksekten düşüğe sırala ve ilk 10'u gönder
-    const topScores = scores.sort((a, b) => b.score - a.score).slice(0, 10);
-    res.json(topScores);
+app.get('/api/scores', async (req, res) => {
+    try {
+        // Veritabanından çek, puana göre sırala, ilk 10'u al
+        const topScores = await Score.find().sort({ score: -1 }).limit(10);
+        res.json(topScores);
+    } catch (err) {
+        res.status(500).json({ error: "Veri çekilemedi" });
+    }
 });
 
 // 2. Skor Kaydet (Aynı İsim Kontrollü)
-app.post('/api/score', (req, res) => {
+app.post('/api/score', async (req, res) => {
     const { name, score } = req.body;
     if (!name || score === undefined) return res.status(400).json({ message: 'Eksik bilgi' });
 
     const newScore = parseInt(score);
-    
-    // İsim temizliği (Çok uzun isimleri kes, HTML karakterlerini engelle)
+    // İsim temizliği
     const cleanName = name.trim().substring(0, 15).replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-    const existingUserIndex = scores.findIndex(s => s.name === cleanName);
+    try {
+        // Bu isimde biri var mı bak
+        const existingUser = await Score.findOne({ name: cleanName });
 
-    if (existingUserIndex !== -1) {
-        if (newScore > scores[existingUserIndex].score) {
-            scores[existingUserIndex].score = newScore;
-            scores[existingUserIndex].date = new Date();
+        if (existingUser) {
+            // Varsa ve yeni skor daha yüksekse güncelle
+            if (newScore > existingUser.score) {
+                existingUser.score = newScore;
+                existingUser.date = new Date();
+                await existingUser.save();
+            }
+        } else {
+            // Yoksa yeni oluştur
+            const newEntry = new Score({ name: cleanName, score: newScore });
+            await newEntry.save();
         }
-    } else {
-        scores.push({ name: cleanName, score: newScore, date: new Date() });
+        res.json({ status: 'success' });
+    } catch (err) {
+        res.status(500).json({ error: "Kaydedilemedi" });
     }
-    
-    fs.writeFileSync(DB_FILE, JSON.stringify(scores));
-    res.json({ status: 'success' });
 });
 
-// --- YÖNETİCİ (ADMIN) KOMUTLARI ---
+// --- ADMIN KOMUTLARI ---
 
-// 3. İsim Silme: /api/admin/delete?name=Arda&pass=SİFRE123
-app.get('/api/admin/delete', (req, res) => {
+// Silme: /api/admin/delete?name=Ali&pass=SİFRE123
+app.get('/api/admin/delete', async (req, res) => {
     const { name, pass } = req.query;
-
     if (pass !== ADMIN_PASSWORD) return res.send("HATA: Yanlış Şifre!");
 
-    const initialLength = scores.length;
-    scores = scores.filter(s => s.name !== name); // İsmi listeden çıkar
-
-    if (scores.length < initialLength) {
-        fs.writeFileSync(DB_FILE, JSON.stringify(scores));
-        res.send(`BAŞARILI: '${name}' isimli oyuncu silindi.`);
-    } else {
-        res.send(`HATA: '${name}' isminde oyuncu bulunamadı.`);
-    }
+    await Score.deleteOne({ name: name });
+    res.send(`İŞLEM TAMAM: ${name} silindi (varsa).`);
 });
 
-// 4. Tabloyu Sıfırlama: /api/admin/reset?pass=SİFRE123
-app.get('/api/admin/reset', (req, res) => {
+// Sıfırlama: /api/admin/reset?pass=SİFRE123
+app.get('/api/admin/reset', async (req, res) => {
     const { pass } = req.query;
-
     if (pass !== ADMIN_PASSWORD) return res.send("HATA: Yanlış Şifre!");
 
-    scores = [];
-    fs.writeFileSync(DB_FILE, JSON.stringify(scores));
-    res.send("BAŞARILI: Tüm skor tablosu sıfırlandı!");
+    await Score.deleteMany({});
+    res.send("BAŞARILI: Veritabanı tamamen temizlendi!");
 });
-// 5. Manuel Skor Ekleme: /api/admin/add?name=Ali&score=1000&pass=SİFRE123
-app.get('/api/admin/add', (req, res) => {
+
+// Ekleme: /api/admin/add?name=Ali&score=100&pass=SİFRE123
+app.get('/api/admin/add', async (req, res) => {
     const { name, score, pass } = req.query;
-
     if (pass !== ADMIN_PASSWORD) return res.send("HATA: Yanlış Şifre!");
-    if (!name || !score) return res.send("HATA: İsim ve Skor belirtilmeli!");
 
+    const cleanName = name.trim();
     const newScore = parseInt(score);
-    
-    // Bu isimde biri var mı?
-    const existingUserIndex = scores.findIndex(s => s.name === name);
 
-    if (existingUserIndex !== -1) {
-        // Varsa puanını güncelle (Düşük olsa bile değiştirir, çünkü admin sensin)
-        scores[existingUserIndex].score = newScore;
-        res.send(`GÜNCELLENDİ: ${name} kullanıcısının puanı ${newScore} yapıldı.`);
+    const existingUser = await Score.findOne({ name: cleanName });
+    if (existingUser) {
+        existingUser.score = newScore;
+        await existingUser.save();
+        res.send("GÜNCELLENDİ");
     } else {
-        // Yoksa yeni oluştur
-        scores.push({ name: name, score: newScore, date: new Date() });
-        res.send(`EKLENDİ: ${name} kullanıcısı ${newScore} puanla listeye eklendi.`);
+        await new Score({ name: cleanName, score: newScore }).save();
+        res.send("EKLENDİ");
     }
-
-    // Kaydet
-    fs.writeFileSync(DB_FILE, JSON.stringify(scores));
 });
 
 app.listen(PORT, () => {
-    console.log(`Sunucu çalışıyor... Port: ${PORT}`);
+    console.log(`Sunucu ${PORT} portunda çalışıyor...`);
 });
